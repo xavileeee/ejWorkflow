@@ -1,0 +1,106 @@
+name: Resumen diario noticias IES Sáenz de Buruaga
+
+on:
+  schedule:
+    # Ejecutar todos los días a las 7:00 AM (hora española)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Permitir ejecución manual
+
+permissions: {}
+
+jobs:
+  resumen-noticias:
+    name: Buscar y resumir noticias del centro
+    runs-on: ubuntu-latest
+    permissions:
+      models: read # Para resumen con IA
+
+    steps:
+      - name: Buscar noticias con Linkup API
+        id: search
+        env:
+          LINKUP_API_KEY: ${{ secrets.LINK_API_KEY }}
+        run: |
+          echo "Buscando noticias recientes del IES Sáenz de Buruaga..."
+          
+          RESPONSE=$(curl -s --request POST \
+            --url "https://api.linkup.so/v1/search" \
+            --header "Authorization: Bearer $LINKUP_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data '{
+              "q": "IES Sáenz de Buruaga noticias recientes",
+              "depth": "deep",
+              "outputType": "searchResults",
+              "includeImages": "false"
+            }')
+          
+          echo "Respuesta recibida: ${#RESPONSE} caracteres"
+          
+          # Extraer las primeras 10 noticias
+          RESULTS=$(echo "$RESPONSE" | jq -r '.results[:10][] | "📰 Fuente: \(.name)\n🔗 URL: \(.url)\n📄 Contenido: \(.content)\n---"' 2>/dev/null || echo "No se encontraron resultados")
+          
+          # Truncar si es muy largo
+          if [ ${#RESULTS} -gt 12000 ]; then
+            RESULTS="${RESULTS:0:12000}..."
+          fi
+          
+          # Guardar en archivo
+          echo "$RESULTS" > noticias_centro.txt
+          echo "Noticias guardadas en archivo"
+
+      - name: Generar resumen con IA
+        id: resumen
+        uses: actions/ai-inference@a380166897b5408b8fb7dddd148142794cb5624a # v2.0.6
+        with:
+          model: openai/gpt-4.1
+          system-prompt: |
+            Eres un asistente especializado en comunicación institucional para centros educativos.
+            
+            Tu tarea es crear un resumen ejecutivo de noticias para el equipo directivo del IES Sáenz de Buruaga (Mérida, Badajoz).
+            
+            El resumen debe:
+            1. Estar escrito en español formal y profesional
+            2. Comenzar con la fecha del informe
+            3. Organizar las noticias por relevancia/importancia
+            4. Destacar:
+               - Logros y reconocimientos del centro o alumnado
+               - Actividades y eventos realizados o próximos
+               - Proyectos educativos (Erasmus+, olimpiadas, etc.)
+               - Menciones en medios de comunicación
+               - Información relevante para la gestión del centro
+            5. Incluir las fuentes de cada noticia
+            6. Finalizar con una sección de "Puntos de atención" si hay temas que requieren seguimiento
+            
+            Formato:
+            - Usar encabezados claros
+            - Bullet points para facilitar la lectura
+            - Máximo 600 palabras
+            - Tono profesional pero accesible
+
+          prompt: |
+            Genera un informe resumen de las siguientes noticias relacionadas con el IES Sáenz de Buruaga para presentar al equipo directivo del centro.
+            
+            Fecha del informe: $(date +%d/%m/%Y)
+            
+            Noticias encontradas:
+
+          prompt-file: noticias_centro.txt
+          max-tokens: 1500
+
+      - name: Mostrar resumen
+        run: |
+          echo "========================================"
+          echo "📋 INFORME DIARIO - IES SÁENZ DE BURUAGA"
+          echo "========================================"
+          echo ""
+          echo "${{ steps.resumen.outputs.response }}"
+          echo ""
+          echo "========================================"
+
+      - name: Guardar informe como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: informe-noticias-${{ github.run_number }}
+          path: |
+            noticias_centro.txt
+          retention-days: 30
