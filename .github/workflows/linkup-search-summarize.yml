@@ -1,0 +1,106 @@
+name: Search and Summarize with AI
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Topic to search for'
+        required: true
+        type: string
+      depth:
+        description: 'Search depth'
+        required: false
+        type: choice
+        options:
+          - standard
+          - deep
+        default: standard
+
+permissions: {}
+
+jobs:
+  search-and-summarize:
+    name: Search and summarize topic
+    runs-on: ubuntu-latest
+    permissions:
+      models: read # For AI-based summarization
+
+    steps:
+      - name: Search with Linkup API
+        id: search
+        env:
+          LINKUP_API_KEY: ${{ secrets.LINK_API_KEY }}
+          SEARCH_TOPIC: ${{ inputs.topic }}
+          SEARCH_DEPTH: ${{ inputs.depth }}
+        run: |
+          echo "Searching for: $SEARCH_TOPIC"
+          
+          RESPONSE=$(curl -s --request POST \
+            --url "https://api.linkup.so/v1/search" \
+            --header "Authorization: Bearer $LINKUP_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"q\": \"$SEARCH_TOPIC\",
+              \"depth\": \"$SEARCH_DEPTH\",
+              \"outputType\": \"searchResults\",
+              \"includeImages\": \"false\"
+            }")
+          
+          echo "Raw response length: ${#RESPONSE}"
+          
+          # Extract and clean results for the AI
+          RESULTS=$(echo "$RESPONSE" | jq -r '.results[] | "Source: \(.name)\nURL: \(.url)\nContent: \(.content)\n---"' 2>/dev/null || echo "No results found")
+          
+          # Truncate if too long (max ~10000 chars for AI context)
+          if [ ${#RESULTS} -gt 10000 ]; then
+            RESULTS="${RESULTS:0:10000}..."
+          fi
+          
+          # Save to file to avoid escaping issues
+          echo "$RESULTS" > search_results.txt
+          echo "results_file=search_results.txt" >> $GITHUB_OUTPUT
+
+      - name: Summarize results with AI
+        id: summarize
+        uses: actions/ai-inference@a380166897b5408b8fb7dddd148142794cb5624a # v2.0.6
+        with:
+          model: openai/gpt-4.1
+          system-prompt: |
+            You are a helpful assistant that summarizes search results clearly and concisely.
+            
+            Your task:
+            1. Analyze the search results provided
+            2. Extract the most important and relevant information
+            3. Organize the summary in a clear, readable format
+            4. Highlight key facts, dates, and notable information
+            5. If there are multiple sources, synthesize them into a coherent summary
+            6. Use bullet points for better readability when appropriate
+            7. Mention the sources when citing specific information
+            
+            Keep the summary informative but concise (around 300-500 words).
+            Write in the same language as the search results.
+
+          prompt: |
+            Please summarize the following search results for the topic: "${{ inputs.topic }}"
+            
+            Search Results:
+            ${{ steps.search.outputs.results_file && 'See attached file' || 'No results' }}
+
+          prompt-file: search_results.txt
+          max-tokens: 1000
+
+      - name: Display summary
+        run: |
+          echo "## 🔍 Search Topic: ${{ inputs.topic }}"
+          echo ""
+          echo "## 📝 AI Summary:"
+          echo ""
+          echo "${{ steps.summarize.outputs.response }}"
+
+      - name: Create summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-summary-${{ github.run_number }}
+          path: |
+            search_results.txt
+          retention-days: 7

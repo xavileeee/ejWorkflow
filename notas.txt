@@ -1,0 +1,12 @@
+Los servicios como brave api key y link.so sirven para que hagan llamadas a google.
+
+usa curl --request POST \
+  --url "https://api.linkup.so/v1/search" \
+  --header "Authorization: Bearer *********-*********-*********-********" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "q": "noticias recientes del IES Sáenz de Buruaga",
+    "depth": "standard",
+    "outputType": "searchResults",
+    "includeImages": "false"
+}' con la api LINK_API_KEY del .env
