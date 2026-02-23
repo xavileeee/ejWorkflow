@@ -1,9 +1,9 @@
 name: Resumen diario noticias IES Sáenz de Buruaga
 
 on:
-  schedule:
+  #schedule:
     # Ejecutar todos los días a las 7:00 AM (hora española)
-    - cron: '0 6 * * *'
+  #  - cron: '0 6 * * *'
   workflow_dispatch: # Permitir ejecución manual
 
 permissions: {}
